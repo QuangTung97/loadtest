@@ -41,10 +41,16 @@ type RunResult struct {
 	BlockedDuration time.Duration
 }
 
+type supplyData struct {
+	reqID           int
+	qps             float64
+	blockedDuration time.Duration
+}
+
 // TestCase ...
 type TestCase struct {
 	conf       Config
-	supplyChan chan int
+	supplyChan chan supplyData
 	resultChan chan RunResult
 
 	ctx       context.Context
@@ -125,7 +131,7 @@ func (d *dynamicQPS) blockedDuration(duration time.Duration) {
 
 // New ...
 func New(conf Config) *TestCase {
-	chanSize := 1024
+	chanSize := 10
 	if conf.SupplyChanSize > 0 {
 		chanSize = conf.SupplyChanSize
 	}
@@ -134,7 +140,7 @@ func New(conf Config) *TestCase {
 
 	return &TestCase{
 		conf:       conf,
-		supplyChan: make(chan int, chanSize),
+		supplyChan: make(chan supplyData, chanSize),
 		resultChan: make(chan RunResult, 1024),
 
 		ctx:       ctx,
@@ -143,16 +149,18 @@ func New(conf Config) *TestCase {
 	}
 }
 
-func (tc *TestCase) runConfigFunc(threadID int, requestID int) {
+func (tc *TestCase) runConfigFunc(threadID int, data supplyData) {
 	start := time.Now()
 	tc.conf.Func()
 	end := time.Now()
 
 	tc.resultChan <- RunResult{
-		ThreadID:  threadID,
-		RequestID: requestID,
-		StartedAt: start,
-		Duration:  end.Sub(start),
+		ThreadID:        threadID,
+		RequestID:       data.reqID,
+		StartedAt:       start,
+		Duration:        end.Sub(start),
+		QPS:             data.qps,
+		BlockedDuration: data.blockedDuration,
 	}
 }
 
@@ -164,11 +172,11 @@ func (tc *TestCase) runThread(threadID int) {
 			select {
 			case <-tc.ctx.Done():
 				return
-			case requestID, ok := <-tc.supplyChan:
+			case data, ok := <-tc.supplyChan:
 				if !ok {
 					return
 				}
-				tc.runConfigFunc(threadID, requestID)
+				tc.runConfigFunc(threadID, data)
 			}
 		}
 	}()
@@ -177,12 +185,21 @@ func (tc *TestCase) runThread(threadID int) {
 func (tc *TestCase) supplyWithStaticQPS() {
 	defer tc.wg.Done()
 
+	lastBlocked := time.Duration(0)
 	for i := 0; i < tc.conf.NumRequests; i++ {
 		if tc.ctx.Err() != nil {
 			return
 		}
 
-		tc.supplyChan <- i
+		begin := time.Now()
+		tc.supplyChan <- supplyData{
+			reqID:           i,
+			qps:             tc.conf.QPS.StaticValue,
+			blockedDuration: lastBlocked,
+		}
+		end := time.Now()
+		lastBlocked = end.Sub(begin)
+
 		time.Sleep(computeSleepDurationStatic(tc.conf.QPS.StaticValue))
 	}
 	close(tc.supplyChan)
@@ -194,14 +211,20 @@ func (tc *TestCase) supplyWithDynamicQPS() {
 	d := newDynamicQPS(tc.conf.QPS)
 	d.start(time.Now())
 
+	lastBlocked := time.Duration(0)
 	for i := 0; i < tc.conf.NumRequests; i++ {
 		if tc.ctx.Err() != nil {
 			return
 		}
 
 		begin := time.Now()
-		tc.supplyChan <- i
+		tc.supplyChan <- supplyData{
+			reqID:           i,
+			qps:             d.lastValue,
+			blockedDuration: lastBlocked,
+		}
 		end := time.Now()
+		lastBlocked = end.Sub(begin)
 
 		d.blockedDuration(end.Sub(begin))
 		time.Sleep(d.getSleepTime(end))

@@ -45,16 +45,20 @@ func mustParse(s string) time.Time {
 func TestWriteToCSV(t *testing.T) {
 	l := RunResultList([]RunResult{
 		{
-			ThreadID:  10,
-			RequestID: 20,
-			StartedAt: mustParse("2021-09-16T10:20:30+07:00"),
-			Duration:  4 * time.Second,
+			ThreadID:        10,
+			RequestID:       20,
+			StartedAt:       mustParse("2021-09-16T10:20:30+07:00"),
+			Duration:        4 * time.Second,
+			QPS:             20,
+			BlockedDuration: 10 * time.Millisecond,
 		},
 		{
-			ThreadID:  11,
-			RequestID: 21,
-			StartedAt: mustParse("2021-09-18T10:20:30+07:00"),
-			Duration:  328 * time.Microsecond,
+			ThreadID:        11,
+			RequestID:       21,
+			StartedAt:       mustParse("2021-09-18T10:20:30+07:00"),
+			Duration:        328 * time.Microsecond,
+			QPS:             30,
+			BlockedDuration: 250 * time.Microsecond,
 		},
 	})
 
@@ -62,8 +66,8 @@ func TestWriteToCSV(t *testing.T) {
 	err := l.WriteToCSV(&buf)
 	assert.Equal(t, nil, err)
 	expected := strings.TrimLeft(`
-10,20,2021-09-16T03:20:30Z,4000.00
-11,21,2021-09-18T03:20:30Z,0.33
+10,20,2021-09-16T03:20:30Z,4000.00,20.0,10.00
+11,21,2021-09-18T03:20:30Z,0.33,30.0,0.25
 `, " \r\n\t")
 	assert.Equal(t, expected, buf.String())
 }

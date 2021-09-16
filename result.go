@@ -51,6 +51,8 @@ func (l RunResultList) WriteToCSV(w io.Writer) error {
 			strconv.Itoa(e.RequestID),
 			e.StartedAt.UTC().Format(time.RFC3339),
 			fmt.Sprintf("%.2f", float64(e.Duration)/1000000.0),
+			fmt.Sprintf("%.1f", e.QPS),
+			fmt.Sprintf("%.2f", float64(e.BlockedDuration)/1000000.0),
 		})
 		if err != nil {
 			return err

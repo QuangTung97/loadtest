@@ -137,6 +137,8 @@ func TestRun_Completed(t *testing.T) {
 	}
 	assert.Equal(t, 9, maxTID)
 	assert.Equal(t, 79, maxReqID)
+
+	assert.Equal(t, float64(1000), tc.GetRunResults()[0].QPS)
 }
 
 func TestRun_Cancelled(t *testing.T) {
@@ -156,4 +158,41 @@ func TestRun_Cancelled(t *testing.T) {
 
 	tc.Run()
 	tc.Cancel()
+}
+
+func TestRun_WithDynamicQPS(t *testing.T) {
+	counter := uint32(0)
+
+	tc := New(Config{
+		NumRequests: 80,
+		QPS: QPSConfig{
+			IsDynamic:   true,
+			StartValue:  20,
+			DoubleEvery: 50 * time.Millisecond,
+			Saturation: SaturationThreshold{
+				BlockedDuration:  1 * time.Millisecond,
+				ConsecutiveTimes: 2,
+			},
+		},
+		NumThreads: 10,
+		Func: func() {
+			atomic.AddUint32(&counter, 1)
+		},
+		SupplyChanSize: 2048,
+	})
+
+	tc.Run()
+	tc.WaitFinish()
+
+	assert.Equal(t, uint32(80), counter)
+	assert.Equal(t, 80, len(tc.GetRunResults()))
+
+	maxTID := 0
+	maxReqID := 0
+	for _, r := range tc.GetRunResults() {
+		maxTID = maxInt(maxTID, r.ThreadID)
+		maxReqID = maxInt(maxReqID, r.RequestID)
+	}
+	assert.Equal(t, 9, maxTID)
+	assert.Equal(t, 79, maxReqID)
 }
