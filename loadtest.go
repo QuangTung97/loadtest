@@ -7,29 +7,45 @@ import (
 	"time"
 )
 
+// SaturationThreshold ...
+type SaturationThreshold struct {
+	BlockedDuration  time.Duration
+	ConsecutiveTimes int
+}
+
+// QPSConfig ...
+type QPSConfig struct {
+	StaticValue float64
+	IsDynamic   bool
+	StartValue  float64
+	DoubleEvery time.Duration
+	Saturation  SaturationThreshold
+}
+
 // Config ...
 type Config struct {
-	NumRequests       int
-	RequestsPerSecond float64
-	NumThreads        int
-	Func              func()
-	SupplyChanSize    int
+	NumRequests    int
+	QPS            QPSConfig
+	NumThreads     int
+	Func           func()
+	SupplyChanSize int
 }
 
 // RunResult ...
 type RunResult struct {
-	ThreadID  int
-	RequestID int
-	StartedAt time.Time
-	Duration  time.Duration
+	ThreadID        int
+	RequestID       int
+	StartedAt       time.Time
+	Duration        time.Duration
+	QPS             float64
+	BlockedDuration time.Duration
 }
 
 // TestCase ...
 type TestCase struct {
-	conf          Config
-	sleepDuration time.Duration
-	supplyChan    chan int
-	resultChan    chan RunResult
+	conf       Config
+	supplyChan chan int
+	resultChan chan RunResult
 
 	ctx       context.Context
 	cancel    func()
@@ -38,8 +54,73 @@ type TestCase struct {
 	results   []RunResult
 }
 
-func computeSleepDuration(reqsPerSecond float64) time.Duration {
-	return time.Duration(math.Round(1000000000/reqsPerSecond)) * time.Nanosecond
+func computeSleepDurationStatic(qps float64) time.Duration {
+	return time.Duration(math.Round(1000000000/qps)) * time.Nanosecond
+}
+
+type dynamicQPS struct {
+	conf QPSConfig
+
+	startValue float64
+	startTime  time.Time
+
+	lastValue float64
+	lastTime  time.Time
+
+	blockedCount int
+	goDown       bool
+}
+
+func newDynamicQPS(conf QPSConfig) *dynamicQPS {
+	return &dynamicQPS{
+		conf:         conf,
+		startValue:   conf.StartValue,
+		blockedCount: 0,
+	}
+}
+
+func (d *dynamicQPS) start(now time.Time) {
+	d.startTime = now
+}
+
+func (d *dynamicQPS) getSleepTime(now time.Time) time.Duration {
+	d.lastTime = now
+
+	diff := now.Sub(d.startTime)
+	n := float64(diff) / float64(d.conf.DoubleEvery)
+
+	if d.goDown {
+		n = -n
+	}
+
+	k := math.Pow(2.0, n)
+	d.lastValue = d.startValue * k
+	result := 1000000000 / d.lastValue
+
+	if d.goDown && diff >= d.conf.DoubleEvery {
+		d.goDown = false
+		d.setStartValues()
+	}
+
+	return time.Duration(math.Round(result)) * time.Nanosecond
+}
+
+func (d *dynamicQPS) setStartValues() {
+	d.startTime = d.lastTime
+	d.startValue = d.lastValue
+	d.blockedCount = 0
+}
+
+func (d *dynamicQPS) blockedDuration(duration time.Duration) {
+	if duration < d.conf.Saturation.BlockedDuration {
+		return
+	}
+	d.blockedCount++
+
+	if d.blockedCount >= d.conf.Saturation.ConsecutiveTimes {
+		d.goDown = true
+		d.setStartValues()
+	}
 }
 
 // New ...
@@ -52,10 +133,9 @@ func New(conf Config) *TestCase {
 	ctx, cancel := context.WithCancel(context.Background())
 
 	return &TestCase{
-		conf:          conf,
-		sleepDuration: computeSleepDuration(conf.RequestsPerSecond),
-		supplyChan:    make(chan int, chanSize),
-		resultChan:    make(chan RunResult, 1024),
+		conf:       conf,
+		supplyChan: make(chan int, chanSize),
+		resultChan: make(chan RunResult, 1024),
 
 		ctx:       ctx,
 		cancel:    cancel,
@@ -94,22 +174,50 @@ func (tc *TestCase) runThread(threadID int) {
 	}()
 }
 
+func (tc *TestCase) supplyWithStaticQPS() {
+	defer tc.wg.Done()
+
+	for i := 0; i < tc.conf.NumRequests; i++ {
+		if tc.ctx.Err() != nil {
+			return
+		}
+
+		tc.supplyChan <- i
+		time.Sleep(computeSleepDurationStatic(tc.conf.QPS.StaticValue))
+	}
+	close(tc.supplyChan)
+}
+
+func (tc *TestCase) supplyWithDynamicQPS() {
+	defer tc.wg.Done()
+
+	d := newDynamicQPS(tc.conf.QPS)
+	d.start(time.Now())
+
+	for i := 0; i < tc.conf.NumRequests; i++ {
+		if tc.ctx.Err() != nil {
+			return
+		}
+
+		begin := time.Now()
+		tc.supplyChan <- i
+		end := time.Now()
+
+		d.blockedDuration(end.Sub(begin))
+		time.Sleep(d.getSleepTime(end))
+	}
+	close(tc.supplyChan)
+}
+
 // Run in background
 func (tc *TestCase) Run() {
 	tc.wg.Add(tc.conf.NumThreads + 2)
 
-	go func() {
-		defer tc.wg.Done()
-
-		for i := 0; i < tc.conf.NumRequests; i++ {
-			if tc.ctx.Err() != nil {
-				return
-			}
-			tc.supplyChan <- i
-			time.Sleep(tc.sleepDuration)
-		}
-		close(tc.supplyChan)
-	}()
+	if tc.conf.QPS.IsDynamic {
+		go tc.supplyWithDynamicQPS()
+	} else {
+		go tc.supplyWithStaticQPS()
+	}
 
 	go func() {
 		defer tc.wg.Done()
