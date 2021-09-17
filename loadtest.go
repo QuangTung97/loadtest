@@ -165,6 +165,7 @@ func (d *dynamicQPS) setStartValues() {
 
 func (d *dynamicQPS) blockedDuration(duration time.Duration) {
 	if duration < d.conf.Saturation.BlockedDuration {
+		d.blockedCount = 0
 		return
 	}
 	d.blockedCount++
