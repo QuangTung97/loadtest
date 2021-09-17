@@ -2,6 +2,7 @@ package loadtest
 
 import (
 	"bytes"
+	"database/sql"
 	"github.com/stretchr/testify/assert"
 	"strings"
 	"testing"
@@ -40,6 +41,13 @@ func mustParse(s string) time.Time {
 		panic(err)
 	}
 	return t
+}
+
+func mustParseNull(s string) sql.NullTime {
+	return sql.NullTime{
+		Valid: true,
+		Time:  mustParse(s),
+	}
 }
 
 func TestWriteToCSV(t *testing.T) {

@@ -191,19 +191,29 @@ func TestComputeSleepDuration_Dynamic(t *testing.T) {
 		},
 	})
 
-	c.start(mustParse("2021-09-16T10:00:00+07:00"))
+	startTime := mustParse("2021-09-16T10:00:00+07:00")
+	c.start(startTime)
 
-	d := c.getSleepTime(mustParse("2021-09-16T10:00:00+07:00"))
+	d := c.getSleepTime(startTime)
 	assert.Equal(t, 50*time.Millisecond, d)
 
+	d = c.getSleepTime(startTime.Add(51 * time.Millisecond))
+	assert.Equal(t, 48997054*time.Nanosecond, d)
+
+	c.nextWakeupTime = mustParseNull("2021-09-16T10:10:00+07:00")
 	d = c.getSleepTime(mustParse("2021-09-16T10:10:00+07:00"))
 	assert.Equal(t, 25*time.Millisecond, d)
 
+	c.nextWakeupTime = mustParseNull("2021-09-16T10:20:00+07:00")
 	d = c.getSleepTime(mustParse("2021-09-16T10:20:00+07:00"))
 	assert.Equal(t, 12500*time.Microsecond, d)
 
+	c.nextWakeupTime = mustParseNull("2021-09-16T10:30:00+07:00")
 	d = c.getSleepTime(mustParse("2021-09-16T10:30:00+07:00"))
 	assert.Equal(t, 6250*time.Microsecond, d)
+
+	d = c.getSleepTime(mustParse("2021-09-16T10:40:00+07:00"))
+	assert.Equal(t, 0*time.Microsecond, d)
 }
 
 func TestComputeSleepDuration_Saturated(t *testing.T) {
@@ -224,12 +234,14 @@ func TestComputeSleepDuration_Saturated(t *testing.T) {
 	assert.Equal(t, 50*time.Millisecond, d)
 
 	c.blockedDuration(1500 * time.Microsecond)
+	c.nextWakeupTime = mustParseNull("2021-09-16T10:10:00+07:00")
 	d = c.getSleepTime(mustParse("2021-09-16T10:10:00+07:00"))
 	assert.Equal(t, 25*time.Millisecond, d)
 
 	c.blockedDuration(1500 * time.Microsecond)
 	c.blockedDuration(1500 * time.Microsecond)
 
+	c.nextWakeupTime = mustParseNull("2021-09-16T10:10:00+07:00")
 	d = c.getSleepTime(mustParse("2021-09-16T10:10:00+07:00"))
 	assert.Equal(t, 25*time.Millisecond, d)
 
@@ -237,31 +249,39 @@ func TestComputeSleepDuration_Saturated(t *testing.T) {
 	c.blockedDuration(2 * time.Millisecond)
 	c.blockedDuration(2 * time.Millisecond)
 
+	c.nextWakeupTime = mustParseNull("2021-09-16T10:10:00+07:00")
 	d = c.getSleepTime(mustParse("2021-09-16T10:10:00+07:00"))
 	assert.Equal(t, 25*time.Millisecond, d)
 
+	c.nextWakeupTime = mustParseNull("2021-09-16T10:15:00+07:00")
 	d = c.getSleepTime(mustParse("2021-09-16T10:15:00+07:00"))
 	assert.Equal(t, 35355339*time.Nanosecond, d)
 
+	c.nextWakeupTime = mustParseNull("2021-09-16T10:20:00+07:00")
 	d = c.getSleepTime(mustParse("2021-09-16T10:20:00+07:00"))
 	assert.Equal(t, 50*time.Millisecond, d)
 
+	c.nextWakeupTime = mustParseNull("2021-09-16T10:25:00+07:00")
 	d = c.getSleepTime(mustParse("2021-09-16T10:25:00+07:00"))
 	assert.Equal(t, 35355339*time.Nanosecond, d)
 
+	c.nextWakeupTime = mustParseNull("2021-09-16T10:30:00+07:00")
 	d = c.getSleepTime(mustParse("2021-09-16T10:30:00+07:00"))
 	assert.Equal(t, 25*time.Millisecond, d)
 
+	c.nextWakeupTime = mustParseNull("2021-09-16T10:40:00+07:00")
 	d = c.getSleepTime(mustParse("2021-09-16T10:40:00+07:00"))
 	assert.Equal(t, 12500*time.Microsecond, d)
 
 	c.blockedDuration(2 * time.Millisecond)
+	c.nextWakeupTime = mustParseNull("2021-09-16T10:50:00+07:00")
 	d = c.getSleepTime(mustParse("2021-09-16T10:50:00+07:00"))
 	assert.Equal(t, 6250*time.Microsecond, d)
 
 	c.blockedDuration(2 * time.Millisecond)
 	c.blockedDuration(2 * time.Millisecond)
 
+	c.nextWakeupTime = mustParseNull("2021-09-16T11:00:00+07:00")
 	d = c.getSleepTime(mustParse("2021-09-16T11:00:00+07:00"))
 	assert.Equal(t, 12500*time.Microsecond, d)
 }

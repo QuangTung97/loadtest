@@ -2,6 +2,7 @@ package loadtest
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"math"
 	"sync"
@@ -116,8 +117,9 @@ type dynamicQPS struct {
 	startValue float64
 	startTime  time.Time
 
-	lastValue float64
-	lastTime  time.Time
+	lastValue      float64
+	lastTime       time.Time
+	nextWakeupTime sql.NullTime
 
 	blockedCount int
 	goDown       bool
@@ -154,7 +156,18 @@ func (d *dynamicQPS) getSleepTime(now time.Time) time.Duration {
 		d.setStartValues()
 	}
 
-	return time.Duration(math.Round(result)) * time.Nanosecond
+	duration := time.Duration(math.Round(result)) * time.Nanosecond
+	if d.nextWakeupTime.Valid {
+		duration -= now.Sub(d.nextWakeupTime.Time)
+		if duration <= 0 {
+			duration = 0
+		}
+	}
+	d.nextWakeupTime = sql.NullTime{
+		Valid: true,
+		Time:  now.Add(duration),
+	}
+	return duration
 }
 
 func (d *dynamicQPS) setStartValues() {
