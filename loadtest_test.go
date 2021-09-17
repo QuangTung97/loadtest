@@ -1,6 +1,7 @@
 package loadtest
 
 import (
+	"errors"
 	"github.com/stretchr/testify/assert"
 	"sync/atomic"
 	"testing"
@@ -13,6 +14,170 @@ func TestComputeSleepDuration_Static(t *testing.T) {
 
 	d = computeSleepDurationStatic(1000.0)
 	assert.Equal(t, 1*time.Millisecond, d)
+}
+
+func TestValidateConfig(t *testing.T) {
+	table := []struct {
+		name string
+		conf Config
+		err  error
+	}{
+		{
+			name: "missing-num-requests",
+			conf: Config{},
+			err:  errors.New("missing NumRequests"),
+		},
+		{
+			name: "missing-num-threads",
+			conf: Config{
+				NumRequests: 10,
+			},
+			err: errors.New("missing NumThreads"),
+		},
+		{
+			name: "missing-func",
+			conf: Config{
+				NumRequests: 10,
+				NumThreads:  3,
+			},
+			err: errors.New("missing Func"),
+		},
+		{
+			name: "missing-qps",
+			conf: Config{
+				NumRequests: 10,
+				NumThreads:  3,
+				Func:        func() {},
+				QPS:         QPSConfig{},
+			},
+			err: errors.New("missing QPS"),
+		},
+		{
+			name: "ok-static",
+			conf: Config{
+				NumRequests: 10,
+				NumThreads:  3,
+				Func:        func() {},
+				QPS: QPSConfig{
+					StaticValue: 100.0,
+				},
+			},
+			err: nil,
+		},
+		{
+			name: "dynamic-missing-start-value",
+			conf: Config{
+				NumRequests: 10,
+				NumThreads:  3,
+				Func:        func() {},
+				QPS: QPSConfig{
+					IsDynamic: true,
+				},
+			},
+			err: errors.New("missing QPS.StartValue"),
+		},
+		{
+			name: "dynamic-missing-double-every",
+			conf: Config{
+				NumRequests: 10,
+				NumThreads:  3,
+				Func:        func() {},
+				QPS: QPSConfig{
+					IsDynamic:  true,
+					StartValue: 20.0,
+				},
+			},
+			err: errors.New("missing QPS.DoubleEvery"),
+		},
+		{
+			name: "missing-saturation",
+			conf: Config{
+				NumRequests: 10,
+				NumThreads:  3,
+				Func:        func() {},
+				QPS: QPSConfig{
+					IsDynamic:   true,
+					StartValue:  20.0,
+					DoubleEvery: 10 * time.Minute,
+				},
+			},
+			err: errors.New("missing QPS.Saturation"),
+		},
+		{
+			name: "missing-saturation",
+			conf: Config{
+				NumRequests: 10,
+				NumThreads:  3,
+				Func:        func() {},
+				QPS: QPSConfig{
+					IsDynamic:   true,
+					StartValue:  20.0,
+					DoubleEvery: 10 * time.Minute,
+				},
+			},
+			err: errors.New("missing QPS.Saturation"),
+		},
+		{
+			name: "missing-qps-consecutive-times",
+			conf: Config{
+				NumRequests: 10,
+				NumThreads:  3,
+				Func:        func() {},
+				QPS: QPSConfig{
+					IsDynamic:   true,
+					StartValue:  20.0,
+					DoubleEvery: 10 * time.Minute,
+					Saturation: SaturationThreshold{
+						BlockedDuration: 2 * time.Millisecond,
+					},
+				},
+			},
+			err: errors.New("missing QPS.ConsecutiveTimes"),
+		},
+		{
+			name: "missing-qps-step-back-duration",
+			conf: Config{
+				NumRequests: 10,
+				NumThreads:  3,
+				Func:        func() {},
+				QPS: QPSConfig{
+					IsDynamic:   true,
+					StartValue:  20.0,
+					DoubleEvery: 10 * time.Minute,
+					Saturation: SaturationThreshold{
+						BlockedDuration:  2 * time.Millisecond,
+						ConsecutiveTimes: 3,
+					},
+				},
+			},
+			err: errors.New("missing QPS.StepBackDuration"),
+		},
+		{
+			name: "ok-dynamic",
+			conf: Config{
+				NumRequests: 10,
+				NumThreads:  3,
+				Func:        func() {},
+				QPS: QPSConfig{
+					IsDynamic:   true,
+					StartValue:  20.0,
+					DoubleEvery: 10 * time.Minute,
+					Saturation: SaturationThreshold{
+						BlockedDuration:  2 * time.Millisecond,
+						ConsecutiveTimes: 3,
+						StepBackDuration: 2 * time.Minute,
+					},
+				},
+			},
+			err: nil,
+		},
+	}
+	for _, e := range table {
+		t.Run(e.name, func(t *testing.T) {
+			err := validateConfig(e.conf)
+			assert.Equal(t, e.err, err)
+		})
+	}
 }
 
 func TestComputeSleepDuration_Dynamic(t *testing.T) {
@@ -48,6 +213,7 @@ func TestComputeSleepDuration_Saturated(t *testing.T) {
 		DoubleEvery: 10 * time.Minute,
 		Saturation: SaturationThreshold{
 			BlockedDuration:  2 * time.Millisecond,
+			StepBackDuration: 10 * time.Minute,
 			ConsecutiveTimes: 3,
 		},
 	})
@@ -172,6 +338,7 @@ func TestRun_WithDynamicQPS(t *testing.T) {
 			Saturation: SaturationThreshold{
 				BlockedDuration:  1 * time.Millisecond,
 				ConsecutiveTimes: 2,
+				StepBackDuration: 20 * time.Millisecond,
 			},
 		},
 		NumThreads: 10,

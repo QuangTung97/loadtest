@@ -2,6 +2,7 @@ package loadtest
 
 import (
 	"context"
+	"errors"
 	"math"
 	"sync"
 	"time"
@@ -10,6 +11,7 @@ import (
 // SaturationThreshold ...
 type SaturationThreshold struct {
 	BlockedDuration  time.Duration
+	StepBackDuration time.Duration
 	ConsecutiveTimes int
 }
 
@@ -64,6 +66,50 @@ func computeSleepDurationStatic(qps float64) time.Duration {
 	return time.Duration(math.Round(1000000000/qps)) * time.Nanosecond
 }
 
+func validateConfigForDynamicQPS(qps QPSConfig) error {
+	if qps.StartValue <= 0 {
+		return errors.New("missing QPS.StartValue")
+	}
+	if qps.DoubleEvery <= 0 {
+		return errors.New("missing QPS.DoubleEvery")
+	}
+	saturation := qps.Saturation
+	if saturation.BlockedDuration <= 0 {
+		return errors.New("missing QPS.Saturation")
+	}
+	if saturation.ConsecutiveTimes <= 0 {
+		return errors.New("missing QPS.ConsecutiveTimes")
+	}
+	if saturation.StepBackDuration <= 0 {
+		return errors.New("missing QPS.StepBackDuration")
+	}
+
+	return nil
+}
+
+func validateConfig(conf Config) error {
+	if conf.NumRequests <= 0 {
+		return errors.New("missing NumRequests")
+	}
+	if conf.NumThreads <= 0 {
+		return errors.New("missing NumThreads")
+	}
+	if conf.Func == nil {
+		return errors.New("missing Func")
+	}
+	if !conf.QPS.IsDynamic && conf.QPS.StaticValue <= 0.0 {
+		return errors.New("missing QPS")
+	}
+	qps := conf.QPS
+	if qps.IsDynamic {
+		err := validateConfigForDynamicQPS(qps)
+		if err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 type dynamicQPS struct {
 	conf QPSConfig
 
@@ -103,7 +149,7 @@ func (d *dynamicQPS) getSleepTime(now time.Time) time.Duration {
 	d.lastValue = d.startValue * k
 	result := 1000000000 / d.lastValue
 
-	if d.goDown && diff >= d.conf.DoubleEvery {
+	if d.goDown && diff >= d.conf.Saturation.StepBackDuration {
 		d.goDown = false
 		d.setStartValues()
 	}
@@ -131,6 +177,10 @@ func (d *dynamicQPS) blockedDuration(duration time.Duration) {
 
 // New ...
 func New(conf Config) *TestCase {
+	if err := validateConfig(conf); err != nil {
+		panic(err)
+	}
+
 	chanSize := 10
 	if conf.SupplyChanSize > 0 {
 		chanSize = conf.SupplyChanSize
