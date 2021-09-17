@@ -160,6 +160,7 @@ func (d *dynamicQPS) getSleepTime(now time.Time) time.Duration {
 	if d.nextWakeupTime.Valid {
 		duration -= now.Sub(d.nextWakeupTime.Time)
 		if duration <= 0 {
+			d.increaseAndCheckBlocked()
 			duration = 0
 		}
 	}
@@ -176,17 +177,20 @@ func (d *dynamicQPS) setStartValues() {
 	d.blockedCount = 0
 }
 
+func (d *dynamicQPS) increaseAndCheckBlocked() {
+	d.blockedCount++
+	if d.blockedCount >= d.conf.Saturation.ConsecutiveTimes {
+		d.goDown = true
+		d.setStartValues()
+	}
+}
+
 func (d *dynamicQPS) blockedDuration(duration time.Duration) {
 	if duration < d.conf.Saturation.BlockedDuration {
 		d.blockedCount = 0
 		return
 	}
-	d.blockedCount++
-
-	if d.blockedCount >= d.conf.Saturation.ConsecutiveTimes {
-		d.goDown = true
-		d.setStartValues()
-	}
+	d.increaseAndCheckBlocked()
 }
 
 // New ...
