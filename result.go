@@ -32,6 +32,13 @@ func (l RunResultList) Sort() {
 	sort.Sort(l)
 }
 
+// SortByRequestID ...
+func (l RunResultList) SortByRequestID() {
+	sort.Slice(l, func(i, j int) bool {
+		return l[i].RequestID < l[j].RequestID
+	})
+}
+
 // Percentile ...
 func (l RunResultList) Percentile(v float64) time.Duration {
 	num := float64(len(l))

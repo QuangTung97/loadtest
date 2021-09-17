@@ -329,6 +329,6 @@ func (tc *TestCase) WaitFinish() {
 }
 
 // GetRunResults ...
-func (tc *TestCase) GetRunResults() []RunResult {
+func (tc *TestCase) GetRunResults() RunResultList {
 	return tc.results
 }
